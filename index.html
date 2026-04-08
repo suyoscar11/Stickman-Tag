@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Stickman Tag 3D</title>
+
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;700;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.182.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.182.0/examples/jsm/"
+            }
+        }
+    </script>
+</head>
+<body>
+    <div id="ui-container">
+        <div id="start-screen">
+            <h1 class="glitch-title">STICKMAN TAG</h1>
+            <p class="subtitle">A High-Speed 3D Parkour Chase</p>
+
+            <div id="mod-selector">
+                <p class="mod-label">MODS</p>
+                <div class="mod-grid">
+                    <button class="mod-btn" data-mod="speed">
+                        <span class="mod-icon">⚡</span>
+                        <span class="mod-name">SPEED</span>
+                        <span class="mod-desc">1.5x speed for all</span>
+                    </button>
+                    <button class="mod-btn" data-mod="lowgrav">
+                        <span class="mod-icon">🌙</span>
+                        <span class="mod-name">LOW GRAV</span>
+                        <span class="mod-desc">Float like the moon</span>
+                    </button>
+                    <button class="mod-btn" data-mod="ghost">
+                        <span class="mod-icon">👻</span>
+                        <span class="mod-name">GHOST</span>
+                        <span class="mod-desc">Enemies flicker</span>
+                    </button>
+                    <button class="mod-btn" data-mod="bighead">
+                        <span class="mod-icon">🎯</span>
+                        <span class="mod-name">BIG HEAD</span>
+                        <span class="mod-desc">Easy targets</span>
+                    </button>
+                    <button class="mod-btn" data-mod="chaos">
+                        <span class="mod-icon">🔥</span>
+                        <span class="mod-name">CHAOS</span>
+                        <span class="mod-desc">Powerups everywhere</span>
+                    </button>
+                    <button class="mod-btn" data-mod="mirror">
+                        <span class="mod-icon">🪞</span>
+                        <span class="mod-name">MIRROR</span>
+                        <span class="mod-desc">Inverted controls</span>
+                    </button>
+                    <button class="mod-btn" data-mod="worldcup">
+                        <span class="mod-icon">🏆</span>
+                        <span class="mod-name">WORLD CUP</span>
+                        <span class="mod-desc">Survive then chase</span>
+                    </button>
+                </div>
+                <div id="mod-count"></div>
+            </div>
+
+            <button id="play-btn">CLICK TO PLAY</button>
+            <p class="controls-text desktop-only">WASD to Move | SPACE to Jump | SHIFT to Sprint | CTRL to Slide | CLICK to Tag | 1-3 Use Powerup</p>
+            <p class="controls-text mobile-only">Touch left half to move | Swipe right half to look | Tap buttons to act</p>
+        </div>
+
+        <div id="hud" style="display: none;">
+            <div class="top-bar">
+                <div id="timer">0.0s</div>
+                <div id="score">Tagged: 0 / 8</div>
+            </div>
+
+            <div id="active-mods-display"></div>
+
+            <div id="worldcup-banner" style="display:none;">
+                <span id="worldcup-phase">EVADE!</span>
+                <span id="worldcup-timer">60s</span>
+            </div>
+
+            <div id="parkour-indicator">
+                <span id="double-jump-icon" class="parkour-icon" title="Double Jump">2x</span>
+                <span id="wall-jump-icon" class="parkour-icon" title="Wall Jump">WJ</span>
+                <span id="slide-icon" class="parkour-icon" title="Slide">SL</span>
+            </div>
+
+            <div id="speed-lines"></div>
+
+            <!-- Powerup Active Indicator -->
+            <div id="powerup-active" class="powerup-active-indicator">
+                <span id="powerup-active-name"></span>
+                <div class="timer-bar"><div class="timer-fill" id="powerup-timer-fill"></div></div>
+            </div>
+
+            <!-- Powerup Inventory Bar -->
+            <div id="powerup-bar">
+                <div class="powerup-slot" id="powerup-slot-0" data-slot="0">
+                    <span class="powerup-key">1</span>
+                </div>
+                <div class="powerup-slot" id="powerup-slot-1" data-slot="1">
+                    <span class="powerup-key">2</span>
+                </div>
+                <div class="powerup-slot" id="powerup-slot-2" data-slot="2">
+                    <span class="powerup-key">3</span>
+                </div>
+            </div>
+
+            <div id="stamina-bar-container">
+                <div id="stamina-bar"></div>
+            </div>
+
+            <div id="mobile-controls">
+                <div id="mobile-move-zone"></div>
+                <div id="action-buttons">
+                    <button id="btn-tag" class="mobile-btn tag-btn">TAG</button>
+                    <div class="small-btns">
+                        <button id="btn-sprint" class="mobile-btn sprint-btn">SPRINT</button>
+                        <button id="btn-jump" class="mobile-btn jump-btn">JUMP</button>
+                    </div>
+                    <button id="btn-slide" class="mobile-btn slide-btn">SLIDE</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/nipplejs/0.10.1/nipplejs.min.js"></script>
+    <script type="module" src="Game.js"></script>
+</body>
+</html>
