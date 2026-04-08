@@ -48,6 +48,12 @@ export default class Player extends GameObject3D {
         this.vaultTargetY = 0;
         this.vaultStartY = 0;
 
+        // Backflip on double jump
+        this.isBackflipping = false;
+        this.backflipTimer = 0;
+        this.backflipDuration = 0.5;
+        this.backflipRotation = 0;
+
         // Sound flags
         this.justJumped = false;
         this.justWallJumped = false;
@@ -356,6 +362,10 @@ export default class Player extends GameObject3D {
                 this.hasDoubleJumped = true;
                 this.canDoubleJump = false;
                 this.justJumped = true;
+                // Trigger backflip
+                this.isBackflipping = true;
+                this.backflipTimer = this.backflipDuration;
+                this.backflipRotation = 0;
             }
             this.mobileJumpTrigger = false;
         }
@@ -375,6 +385,19 @@ export default class Player extends GameObject3D {
         if (this.isGrounded) {
             this.canDoubleJump = true;
             this.hasDoubleJumped = false;
+            this.isBackflipping = false;
+            this.backflipRotation = 0;
+        }
+
+        // Tick backflip
+        if (this.isBackflipping) {
+            this.backflipTimer -= dt;
+            const progress = 1 - (this.backflipTimer / this.backflipDuration);
+            this.backflipRotation = progress * Math.PI * 2; // full 360 rotation
+            if (this.backflipTimer <= 0) {
+                this.isBackflipping = false;
+                this.backflipRotation = 0;
+            }
         }
 
         this.animateLimbs(dt, this.smoothSpeed, isMoving, moveDir);
@@ -514,21 +537,36 @@ export default class Player extends GameObject3D {
                 this.animTime = 0;
             }
         } else {
-            this.torso.rotation.x = 0;
+            // Airborne
             this.bodyGroup.rotation.z = 0;
-            if (this.velocity.y > 0) {
-                this.shoulderL.rotation.x = -Math.PI * 0.35;
-                this.shoulderR.rotation.x = -Math.PI * 0.35;
-                this.hipL.rotation.x = -0.3;
-                this.hipR.rotation.x = 0.2;
+
+            if (this.isBackflipping) {
+                // Backflip: rotate entire body group backward (negative X)
+                this.bodyGroup.rotation.x = -this.backflipRotation;
+                // Tuck pose
+                this.torso.rotation.x = 0;
+                this.shoulderL.rotation.x = -Math.PI * 0.7;
+                this.shoulderR.rotation.x = -Math.PI * 0.7;
+                this.hipL.rotation.x = -1.0;
+                this.hipR.rotation.x = -1.0;
+                this.armL.rotation.x = -0.5;
+                this.armR.rotation.x = -0.5;
             } else {
-                this.shoulderL.rotation.x = -Math.PI * 0.5;
-                this.shoulderR.rotation.x = -Math.PI * 0.5;
-                this.hipL.rotation.x = -0.15;
-                this.hipR.rotation.x = Math.PI / 5;
+                this.torso.rotation.x = 0;
+                if (this.velocity.y > 0) {
+                    this.shoulderL.rotation.x = -Math.PI * 0.35;
+                    this.shoulderR.rotation.x = -Math.PI * 0.35;
+                    this.hipL.rotation.x = -0.3;
+                    this.hipR.rotation.x = 0.2;
+                } else {
+                    this.shoulderL.rotation.x = -Math.PI * 0.5;
+                    this.shoulderR.rotation.x = -Math.PI * 0.5;
+                    this.hipL.rotation.x = -0.15;
+                    this.hipR.rotation.x = Math.PI / 5;
+                }
+                this.armL.rotation.x = -0.2;
+                this.armR.rotation.x = -0.2;
             }
-            this.armL.rotation.x = -0.2;
-            this.armR.rotation.x = -0.2;
         }
     }
 

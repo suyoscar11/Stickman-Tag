@@ -227,6 +227,18 @@ export default class Game {
         };
     }
 
+    applyChapterTheme(chapterIndex) {
+        const themes = [
+            { bg: 0x87ceeb, fog: 0x87ceeb, fogDensity: 0.008 }, // Park - bright sky
+            { bg: 0xc8d6e5, fog: 0xc8d6e5, fogDensity: 0.012 }, // Streets - overcast
+            { bg: 0x636e72, fog: 0x636e72, fogDensity: 0.015 }, // Factory - hazy
+            { bg: 0x2d3436, fog: 0x2d3436, fogDensity: 0.010 }, // Rooftops - dusk
+        ];
+        const t = themes[chapterIndex] || themes[0];
+        this.scene.background.setHex(t.bg);
+        this.scene.fog = new THREE.FogExp2(t.bg, t.fogDensity);
+    }
+
     // ---- SCREENS ----
     hideAllScreens() {
         ['main-menu', 'normal-setup', 'worldcup-setup', 'roadmap-screen', 'shop-screen', 'hud'].forEach(id => {
@@ -467,7 +479,9 @@ export default class Game {
             this.player.collectPowerup('speed');
         }
 
-        this.arena = new Arena(this.scene);
+        const chapterIndex = this.gameMode === 'worldcup' ? 0 : this.getLevelConfig().chapter;
+        this.applyChapterTheme(chapterIndex);
+        this.arena = new Arena(this.scene, chapterIndex);
 
         this.parkourElements = [
             new ParkourElement(this.scene, 'ramp', 0, 0, -10, 0),
