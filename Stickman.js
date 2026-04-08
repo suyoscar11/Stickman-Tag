@@ -26,6 +26,7 @@ export default class Stickman extends GameObject3D {
         this.fleeDistance = config.enemy_flee_distance;
         this.state = 'wander';
         this.isChaser = false;
+        this.isTeammate = false; // If true, doesn't flee from player
         this.targetDir = new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5).normalize();
         this.changeDirTimer = 0;
         this.animTime = 0;
@@ -162,7 +163,7 @@ export default class Stickman extends GameObject3D {
             this.targetDir.x += (Math.random() - 0.5) * 0.2;
             this.targetDir.z += (Math.random() - 0.5) * 0.2;
             this.targetDir.normalize();
-        } else if (distToPlayer < this.fleeDistance) {
+        } else if (!this.isTeammate && distToPlayer < this.fleeDistance) {
             this.state = 'flee';
             currentSpeed = this.runSpeed;
 
