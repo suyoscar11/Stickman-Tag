@@ -7,7 +7,7 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import Player from './Player.js';
 import Arena from './Arena.js';
 import Stickman from './Stickman.js';
-import ParkourElement from './ParkourElement.js';
+
 
 const CONFIG = {
     total_stickmen: 8,
@@ -201,6 +201,12 @@ export default class Game {
         this.arenaCoins = [];
         this.coinSpawnTimer = 0;
         this.sessionCoins = 0;
+
+        // Juice state
+        this.coinPitchIndex = 0;
+        this.coinPitchResetTimer = 0;
+        this.freezeFrameTimer = 0;
+        this.ambientParticles = [];
 
         this.mods = new ModManager();
         this.currency = new CurrencyManager();
@@ -483,17 +489,8 @@ export default class Game {
         this.applyChapterTheme(chapterIndex);
         this.arena = new Arena(this.scene, chapterIndex);
 
-        this.parkourElements = [
-            new ParkourElement(this.scene, 'ramp', 0, 0, -10, 0),
-            new ParkourElement(this.scene, 'platform_stairs', 15, 0, -15, Math.PI / 2),
-            new ParkourElement(this.scene, 'ramp', -20, 0, 10, Math.PI),
-            new ParkourElement(this.scene, 'platform_stairs', -10, 0, 25, 0),
-            new ParkourElement(this.scene, 'ramp', 25, 0, -25, Math.PI / 2),
-        ];
-
         this.allColliders = [];
         this.allColliders.push(...this.arena.colliders);
-        this.parkourElements.forEach(p => this.allColliders.push(...p.colliders));
 
         this.stickmen = [];
 
@@ -606,6 +603,13 @@ export default class Game {
         }
 
         if (!this.audioCtx) this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+        // Init ambient particles
+        if (this.ambientParticles.length === 0) this.initAmbientParticles();
+
+        // 3-2-1-GO countdown (pause game during countdown)
+        this.isRunning = false;
+        this.showCountdown(() => { this.isRunning = true; });
     }
 
     pauseGame() {
@@ -785,10 +789,20 @@ export default class Game {
             c.mesh.rotation.z += dt * 3;
             if (c.grounded) c.mesh.position.y = 1.0 + Math.sin(this.gameTime * 2 + c.bobOffset) * 0.15;
 
-            if (this.player.mesh.position.distanceTo(c.mesh.position) < 1.8) {
+            const dist = this.player.mesh.position.distanceTo(c.mesh.position);
+
+            // Magnetic attraction when close
+            if (dist < 4 && dist > 0.5) {
+                const pullDir = this.player.mesh.position.clone().sub(c.mesh.position).normalize();
+                const pullStrength = (1 - dist / 4) * 12;
+                c.mesh.position.addScaledVector(pullDir, pullStrength * dt);
+            }
+
+            if (dist < 1.2) {
                 this.sessionCoins++;
                 this.currency.addCoins(1);
-                this.playSynthSound('coin');
+                // Escalating pitch coin sound
+                this.playCoinSound();
                 this.scene.remove(c.mesh);
                 this.arenaCoins.splice(i, 1);
                 continue;
@@ -926,6 +940,131 @@ export default class Game {
         }
     }
 
+    // ---- JUICE: SCREEN FLASH ----
+    screenFlash(color = '#ffffff') {
+        const flash = document.createElement('div');
+        flash.style.cssText = `position:fixed;top:0;left:0;width:100vw;height:100vh;background:${color};opacity:0.4;z-index:9998;pointer-events:none;transition:opacity 0.15s;`;
+        document.body.appendChild(flash);
+        requestAnimationFrame(() => { flash.style.opacity = '0'; });
+        setTimeout(() => flash.remove(), 200);
+    }
+
+    // ---- JUICE: FREEZE FRAME ----
+    triggerFreezeFrame(duration = 0.08) {
+        this.freezeFrameTimer = duration;
+    }
+
+    // ---- JUICE: FLOATING SCORE POPUP ----
+    spawnFloatingText(text, position, color = '#fcc419') {
+        const div = document.createElement('div');
+        div.textContent = text;
+        div.style.cssText = `position:fixed;font-family:Outfit,sans-serif;font-weight:900;font-size:24px;color:${color};z-index:9997;pointer-events:none;text-shadow:0 2px 4px rgba(0,0,0,0.3);transition:all 0.8s ease-out;`;
+
+        // Project 3D position to screen
+        const v = position.clone();
+        v.project(this.camera);
+        const x = (v.x * 0.5 + 0.5) * window.innerWidth;
+        const y = (-v.y * 0.5 + 0.5) * window.innerHeight;
+        div.style.left = `${x}px`;
+        div.style.top = `${y}px`;
+        document.body.appendChild(div);
+
+        requestAnimationFrame(() => {
+            div.style.transform = 'translateY(-60px) scale(1.3)';
+            div.style.opacity = '0';
+        });
+        setTimeout(() => div.remove(), 800);
+    }
+
+    // ---- JUICE: CONFETTI BURST ON WIN ----
+    spawnConfetti() {
+        const colors = [0xff6b6b, 0xfcc419, 0x51cf66, 0x339af0, 0xcc5de8, 0xff922b, 0x00b894];
+        for (let i = 0; i < 80; i++) {
+            const geo = new THREE.PlaneGeometry(0.3 + Math.random() * 0.3, 0.15 + Math.random() * 0.1);
+            const mat = new THREE.MeshBasicMaterial({
+                color: colors[Math.floor(Math.random() * colors.length)],
+                side: THREE.DoubleSide,
+                transparent: true,
+            });
+            const p = new THREE.Mesh(geo, mat);
+            const pos = this.player ? this.player.mesh.position.clone() : new THREE.Vector3();
+            p.position.set(pos.x + (Math.random() - 0.5) * 3, pos.y + 3, pos.z + (Math.random() - 0.5) * 3);
+            this.scene.add(p);
+
+            const vel = new THREE.Vector3(
+                (Math.random() - 0.5) * 8,
+                5 + Math.random() * 8,
+                (Math.random() - 0.5) * 8
+            );
+            const rotSpeed = new THREE.Vector3(Math.random() * 10, Math.random() * 10, Math.random() * 10);
+
+            const anim = () => {
+                vel.y -= 0.15;
+                p.position.add(vel.clone().multiplyScalar(0.016));
+                p.rotation.x += rotSpeed.x * 0.016;
+                p.rotation.y += rotSpeed.y * 0.016;
+                p.rotation.z += rotSpeed.z * 0.016;
+                vel.multiplyScalar(0.99);
+                if (p.position.y < -2) { this.scene.remove(p); return; }
+                p.material.opacity = Math.max(0, 1 - Math.max(0, (p.position.y - pos.y - 10) * -0.05));
+                requestAnimationFrame(anim);
+            };
+            anim();
+        }
+    }
+
+    // ---- JUICE: AMBIENT FLOATING PARTICLES ----
+    initAmbientParticles() {
+        const geo = new THREE.SphereGeometry(0.05, 4, 4);
+        const mat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.25 });
+        for (let i = 0; i < 30; i++) {
+            const p = new THREE.Mesh(geo, mat.clone());
+            p.position.set((Math.random() - 0.5) * 60, 1 + Math.random() * 6, (Math.random() - 0.5) * 60);
+            this.scene.add(p);
+            this.ambientParticles.push({
+                mesh: p,
+                baseY: p.position.y,
+                offset: Math.random() * Math.PI * 2,
+                driftX: (Math.random() - 0.5) * 0.3,
+                driftZ: (Math.random() - 0.5) * 0.3,
+            });
+        }
+    }
+
+    updateAmbientParticles(dt) {
+        this.ambientParticles.forEach(ap => {
+            ap.mesh.position.y = ap.baseY + Math.sin(this.gameTime * 0.5 + ap.offset) * 0.5;
+            ap.mesh.position.x += ap.driftX * dt;
+            ap.mesh.position.z += ap.driftZ * dt;
+            // Wrap around
+            if (ap.mesh.position.x > 40) ap.mesh.position.x = -40;
+            if (ap.mesh.position.x < -40) ap.mesh.position.x = 40;
+            if (ap.mesh.position.z > 40) ap.mesh.position.z = -40;
+            if (ap.mesh.position.z < -40) ap.mesh.position.z = 40;
+        });
+    }
+
+    // ---- JUICE: 3-2-1-GO COUNTDOWN ----
+    showCountdown(callback) {
+        const steps = ['3', '2', '1', 'GO!'];
+        let i = 0;
+        const show = () => {
+            if (i >= steps.length) { callback(); return; }
+            const div = document.createElement('div');
+            div.textContent = steps[i];
+            div.style.cssText = `position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) scale(0.5);font-family:Outfit,sans-serif;font-weight:900;font-size:${steps[i] === 'GO!' ? '80' : '120'}px;color:#fff;z-index:9998;pointer-events:none;text-shadow:0 4px 20px rgba(0,0,0,0.3);transition:all 0.4s cubic-bezier(0.175,0.885,0.32,1.275);opacity:1;`;
+            document.body.appendChild(div);
+            requestAnimationFrame(() => {
+                div.style.transform = 'translate(-50%,-50%) scale(1.2)';
+            });
+            setTimeout(() => { div.style.opacity = '0'; div.style.transform = 'translate(-50%,-50%) scale(2)'; }, 500);
+            setTimeout(() => div.remove(), 900);
+            i++;
+            setTimeout(show, 700);
+        };
+        show();
+    }
+
     // ---- TAG ----
     attemptTag() {
         if (!this.player || this.gameEnded) return;
@@ -943,6 +1082,11 @@ export default class Game {
                     this.createTagExplosion(pos, 0xfcc419);
                     this.spawnCoinBurst(pos, CONFIG.coins_per_enemy);
                     setTimeout(() => s.destroy(), 200);
+
+                    // Juice: flash, freeze, popup
+                    this.screenFlash('#fcc419');
+                    this.triggerFreezeFrame(0.08);
+                    this.spawnFloatingText(`+${CONFIG.coins_per_enemy}`, pos);
 
                     if (this.taggedCount >= this.totalStickmen) this.endGame('win');
                     break;
@@ -985,7 +1129,7 @@ export default class Game {
         this.gameEnded = true;
         this.isRunning = false;
 
-        if (type === 'win') this.showWinMenu();
+        if (type === 'win') { this.spawnConfetti(); this.screenFlash('#51cf66'); this.showWinMenu(); }
         else this.showLoseMenu();
 
         setTimeout(() => { if (document.pointerLockElement) document.exitPointerLock(); }, 100);
@@ -1079,12 +1223,12 @@ export default class Game {
         if (this.player) { this.player.destroy(); this.player = null; }
         if (this.arena) { this.arena.destroy(); this.arena = null; }
         if (this.stickmen) { this.stickmen.forEach(s => s.destroy()); this.stickmen = []; }
-        if (this.parkourElements) { this.parkourElements.forEach(p => p.destroy()); this.parkourElements = []; }
         this.activePowerups.forEach(p => this.scene.remove(p)); this.activePowerups = [];
         this.activeTraps.forEach(t => this.scene.remove(t.mesh)); this.activeTraps = [];
         this.arenaCoins.forEach(c => this.scene.remove(c.mesh)); this.arenaCoins = [];
         this.dustParticles.forEach(d => this.scene.remove(d.mesh)); this.dustParticles = [];
         this.trailParticles.forEach(t => this.scene.remove(t.mesh)); this.trailParticles = [];
+        this.ambientParticles.forEach(a => this.scene.remove(a.mesh)); this.ambientParticles = [];
         this.allColliders = [];
         this.wcTeammates = [];
         this.wcEnemyRunners = [];
@@ -1136,6 +1280,26 @@ export default class Game {
     }
 
     // ---- SOUNDS ----
+    playCoinSound() {
+        if (!this.audioCtx) return;
+        const baseFreq = 1200;
+        const semitone = Math.pow(2, 1 / 12);
+        const freq = baseFreq * Math.pow(semitone, this.coinPitchIndex);
+        this.coinPitchIndex = Math.min(this.coinPitchIndex + 1, 12);
+        this.coinPitchResetTimer = 1.0;
+
+        const osc = this.audioCtx.createOscillator();
+        const gain = this.audioCtx.createGain();
+        osc.connect(gain); gain.connect(this.audioCtx.destination);
+        const t = this.audioCtx.currentTime;
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, t);
+        osc.frequency.exponentialRampToValueAtTime(freq * 1.5, t + 0.06);
+        gain.gain.setValueAtTime(0.2, t);
+        gain.gain.exponentialRampToValueAtTime(0.01, t + 0.12);
+        osc.start(); osc.stop(t + 0.12);
+    }
+
     playSynthSound(type) {
         if (!this.audioCtx) return;
         const osc = this.audioCtx.createOscillator();
@@ -1193,6 +1357,22 @@ export default class Game {
     animate() {
         requestAnimationFrame(() => this.animate());
         const dt = Math.min(this.clock.getDelta(), 0.1);
+
+        // Freeze frame pause
+        if (this.freezeFrameTimer > 0) {
+            this.freezeFrameTimer -= dt;
+            this.composer.render();
+            return;
+        }
+
+        // Coin pitch reset
+        if (this.coinPitchResetTimer > 0) {
+            this.coinPitchResetTimer -= dt;
+            if (this.coinPitchResetTimer <= 0) this.coinPitchIndex = 0;
+        }
+
+        // Ambient particles always update
+        this.updateAmbientParticles(dt);
 
         if (this.isRunning && this.player) {
             this.gameTime += dt;

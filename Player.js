@@ -74,6 +74,12 @@ export default class Player extends GameObject3D {
         this.smoothLean = 0;
         this.lastMoveDir = new THREE.Vector3(0, 0, -1);
 
+        // Squash & stretch
+        this.squashTimer = 0;
+        this.wasAirborne = false;
+        this.baseFOV = 68;
+        this.targetFOV = 68;
+
         // --- Visual ---
         this.bodyGroup = new THREE.Group();
         this.mesh.add(this.bodyGroup);
@@ -373,9 +379,39 @@ export default class Player extends GameObject3D {
         this.mesh.position.addScaledVector(this.velocity, dt);
         this.resolveCollisions(allColliders);
 
+        // Landing squash
+        if (this.isGrounded && this.wasAirborne) {
+            this.squashTimer = 0.15;
+        }
+        this.wasAirborne = !this.isGrounded;
+
         if (this.isGrounded) {
             this.canDoubleJump = true;
             this.hasDoubleJumped = false;
+        }
+
+        // Squash/stretch visual
+        if (this.squashTimer > 0) {
+            this.squashTimer -= dt;
+            const t = this.squashTimer / 0.15;
+            const squash = 1 - t * 0.3; // scaleY compresses
+            const spread = 1 + t * 0.2;  // scaleXZ expands
+            this.bodyGroup.scale.set(spread, squash, spread);
+        } else if (!this.isGrounded && this.velocity.y < -3) {
+            // Stretch while falling fast
+            const stretch = Math.min(1.25, 1 + Math.abs(this.velocity.y) * 0.01);
+            this.bodyGroup.scale.set(1 / Math.sqrt(stretch), stretch, 1 / Math.sqrt(stretch));
+        } else {
+            this.bodyGroup.scale.set(1, 1, 1);
+        }
+
+        // FOV boost when sprinting
+        this.targetFOV = this.isSprinting ? 76 : 68;
+        const currentFOV = this.camera.fov;
+        const newFOV = currentFOV + (this.targetFOV - currentFOV) * Math.min(1, 4 * dt);
+        if (Math.abs(newFOV - currentFOV) > 0.1) {
+            this.camera.fov = newFOV;
+            this.camera.updateProjectionMatrix();
         }
 
         this.animateLimbs(dt, this.smoothSpeed, isMoving, moveDir);
