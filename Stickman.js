@@ -299,22 +299,7 @@ export default class Stickman extends GameObject3D {
 
     tag() {
         this.isTagged = true;
-        this.material.color.setHex(0xaaaaaa);
-        this.material.emissive.setHex(0x555555);
-        this.material.emissiveIntensity = 0.1;
-
-        this.shoulderL.rotation.x = 0;
-        this.shoulderR.rotation.x = 0;
-        this.hipL.rotation.x = 0;
-        this.hipR.rotation.x = 0;
-
-        // Clean checkmark indicator instead of red ring
-        const ring = new THREE.Mesh(
-            new THREE.TorusGeometry(0.4, 0.06, 6, 16),
-            new THREE.MeshBasicMaterial({ color: 0x51cf66 })
-        );
-        ring.position.y = 1.9;
-        ring.rotation.x = Math.PI / 2;
-        this.mesh.add(ring);
+        // Make invisible — Game.js will handle coin spawn and removal
+        this.bodyGroup.visible = false;
     }
 }

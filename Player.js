@@ -317,8 +317,10 @@ export default class Player extends GameObject3D {
             this.velocity.z = this.slideDir.z * this.slideSpeed * f;
             if (this.slideTimer <= 0) this.isSliding = false;
         } else {
-            this.velocity.x = moveDir.x * currentSpeed;
-            this.velocity.z = moveDir.z * currentSpeed;
+            // Smooth speed transitions to prevent camera jitter
+            this.smoothSpeed += (currentSpeed - this.smoothSpeed) * Math.min(1, 6 * dt);
+            this.velocity.x = moveDir.x * this.smoothSpeed;
+            this.velocity.z = moveDir.z * this.smoothSpeed;
         }
 
         // 4. Wall check
@@ -375,8 +377,7 @@ export default class Player extends GameObject3D {
             this.hasDoubleJumped = false;
         }
 
-        this.smoothSpeed += (currentSpeed - this.smoothSpeed) * 8 * dt;
-        this.animateLimbs(dt, currentSpeed, isMoving, moveDir);
+        this.animateLimbs(dt, this.smoothSpeed, isMoving, moveDir);
         this.updateCamera(dt, isMoving);
     }
 
@@ -542,7 +543,7 @@ export default class Player extends GameObject3D {
         const targetPos = this.mesh.position.clone().add(camOffset);
         targetPos.y += headBob;
 
-        const smoothFactor = 1 - Math.pow(0.0001, dt);
+        const smoothFactor = 1 - Math.pow(0.01, dt);
         this.camera.position.lerp(targetPos, smoothFactor);
         this.camera.lookAt(
             this.mesh.position.x,

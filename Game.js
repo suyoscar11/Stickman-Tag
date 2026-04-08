@@ -76,6 +76,7 @@ class CurrencyManager {
 class ModManager {
     constructor() {
         this.activeMods = new Set();
+        this.locked = false; // When true, mods cannot be changed
         this.modEffects = {
             speed: { label: 'SPEED' },
             lowgrav: { label: 'LOW GRAV' },
@@ -89,9 +90,11 @@ class ModManager {
     }
     initUI() {
         this.countEl = document.getElementById('mod-count');
-        document.querySelectorAll('.mod-btn').forEach(btn => {
+        this.modBtns = document.querySelectorAll('.mod-btn');
+        this.modBtns.forEach(btn => {
             btn.addEventListener('click', (e) => {
                 e.stopPropagation();
+                if (this.locked) return; // Prevent changes during gameplay
                 const mod = btn.dataset.mod;
                 if (this.activeMods.has(mod)) {
                     this.activeMods.delete(mod);
@@ -104,6 +107,16 @@ class ModManager {
             });
         });
         this.updateCount();
+    }
+    lock() {
+        this.locked = true;
+        this.modBtns.forEach(btn => btn.style.opacity = '0.5');
+        this.modBtns.forEach(btn => btn.style.pointerEvents = 'none');
+    }
+    unlock() {
+        this.locked = false;
+        this.modBtns.forEach(btn => btn.style.opacity = '');
+        this.modBtns.forEach(btn => btn.style.pointerEvents = '');
     }
     updateCount() {
         if (!this.countEl) return;
@@ -134,6 +147,9 @@ export default class Game {
         this.taggedCount = 0;
         this.totalStickmen = CONFIG.total_stickmen;
         this.gameTime = 0;
+
+        // Level progression
+        this.level = parseInt(localStorage.getItem('stickman_level')) || 1;
         this.allColliders = [];
         this.activePowerups = [];
         this.powerupSpawnTimer = CONFIG.powerup_initial_spawn_delay;
@@ -144,6 +160,11 @@ export default class Game {
 
         // Traps placed in world
         this.activeTraps = [];
+
+        // Floating collectible coins in arena
+        this.arenaCoins = [];
+        this.coinSpawnTimer = 0;
+        this.sessionCoins = 0; // Coins earned this round
 
         // World Cup state
         this.wcPhase = 'evade';
@@ -156,6 +177,7 @@ export default class Game {
 
         this.initThree();
         this.initUI();
+        this.updateStartSubtitle();
         this.bindEvents();
         this.initMobileControls();
         this.animate();
@@ -222,9 +244,20 @@ export default class Game {
         this.scene.add(hemiLight);
     }
 
+    getLevelConfig() {
+        const lvl = this.level;
+        return {
+            stickmen: Math.min(CONFIG.total_stickmen + Math.floor((lvl - 1) * 1.5), 20),
+            enemySpeedBonus: Math.min((lvl - 1) * 0.5, 4),
+            fleeDistanceBonus: Math.min((lvl - 1) * 1, 8),
+        };
+    }
+
     initGameObjects() {
         if (this.gameObjectsCreated) return;
         this.gameObjectsCreated = true;
+
+        const lvlCfg = this.getLevelConfig();
 
         this.player = new Player(this.scene, this.camera, CONFIG, this.mods);
         this.arena = new Arena(this.scene);
@@ -252,14 +285,28 @@ export default class Game {
             this.wcTimer = 60;
             this.wcPlayerTagged = false;
         } else {
+            this.totalStickmen = lvlCfg.stickmen;
             for (let i = 0; i < this.totalStickmen; i++) {
                 const x = (Math.random() - 0.5) * 60;
                 const z = (Math.random() - 0.5) * 60;
-                this.stickmen.push(new Stickman(this.scene, x, z, CONFIG, this.mods));
+                const s = new Stickman(this.scene, x, z, CONFIG, this.mods);
+                // Apply level scaling
+                s.speed += lvlCfg.enemySpeedBonus;
+                s.runSpeed += lvlCfg.enemySpeedBonus;
+                s.fleeDistance += lvlCfg.fleeDistanceBonus;
+                this.stickmen.push(s);
             }
         }
 
         this.bindMobileJoystickToPlayer();
+
+        // Scatter initial coins around the arena
+        this.spawnArenaCoins();
+    }
+
+    updateStartSubtitle() {
+        const subtitle = document.getElementById('start-subtitle');
+        if (subtitle) subtitle.textContent = `Level ${this.level} \u2014 Tag ${this.getLevelConfig().stickmen} Players`;
     }
 
     initUI() {
@@ -267,6 +314,7 @@ export default class Game {
         this.hud = document.getElementById('hud');
         this.timeDisplay = document.getElementById('timer');
         this.scoreDisplay = document.getElementById('score');
+        this.levelDisplay = document.getElementById('level-display');
         this.staminaBar = document.getElementById('stamina-bar');
         this.speedLines = document.getElementById('speed-lines');
         this.doubleJumpIcon = document.getElementById('double-jump-icon');
@@ -344,9 +392,12 @@ export default class Game {
         this.initGameObjects();
 
         this.isRunning = true;
+        this.mods.lock();
         this.startScreen.style.display = 'none';
         this.hud.style.display = 'block';
         this.mods.showActiveModsHUD();
+
+        this.levelDisplay.innerText = `Lv. ${this.level}`;
 
         if (this.mods.has('worldcup')) {
             this.wcBanner.style.display = 'flex';
@@ -508,6 +559,120 @@ export default class Game {
                 requestAnimationFrame(anim);
             };
             anim();
+        }
+    }
+
+    // --- COIN SYSTEM ---
+    spawnCoinBurst(position, count) {
+        for (let i = 0; i < count; i++) {
+            const coinGeo = new THREE.CylinderGeometry(0.25, 0.25, 0.08, 12);
+            const coinMat = new THREE.MeshStandardMaterial({
+                color: 0xfcc419, emissive: 0xf59f00, emissiveIntensity: 0.5,
+                metalness: 0.6, roughness: 0.2,
+            });
+            const coin = new THREE.Mesh(coinGeo, coinMat);
+            coin.position.copy(position);
+            coin.position.y += 1;
+            coin.rotation.x = Math.PI / 2;
+            this.scene.add(coin);
+
+            // Burst outward then float
+            const angle = (i / count) * Math.PI * 2 + Math.random() * 0.5;
+            const vel = new THREE.Vector3(
+                Math.cos(angle) * (1.5 + Math.random()),
+                3 + Math.random() * 2,
+                Math.sin(angle) * (1.5 + Math.random())
+            );
+
+            this.arenaCoins.push({
+                mesh: coin,
+                vel: vel,
+                life: 8,
+                grounded: false,
+                bobOffset: Math.random() * Math.PI * 2,
+            });
+        }
+    }
+
+    spawnArenaCoin(x, z) {
+        const coinGeo = new THREE.CylinderGeometry(0.3, 0.3, 0.1, 12);
+        const coinMat = new THREE.MeshStandardMaterial({
+            color: 0xfcc419, emissive: 0xf59f00, emissiveIntensity: 0.4,
+            metalness: 0.6, roughness: 0.2,
+        });
+        const coin = new THREE.Mesh(coinGeo, coinMat);
+        coin.position.set(x, 1.2, z);
+        coin.rotation.x = Math.PI / 2;
+        this.scene.add(coin);
+
+        this.arenaCoins.push({
+            mesh: coin,
+            vel: new THREE.Vector3(0, 0, 0),
+            life: 999,
+            grounded: true,
+            bobOffset: Math.random() * Math.PI * 2,
+        });
+    }
+
+    spawnArenaCoins() {
+        // Scatter coins around the arena
+        for (let i = 0; i < 20; i++) {
+            const x = (Math.random() - 0.5) * 60;
+            const z = (Math.random() - 0.5) * 60;
+            this.spawnArenaCoin(x, z);
+        }
+    }
+
+    updateArenaCoins(dt) {
+        if (!this.player) return;
+
+        // Spawn more coins periodically
+        this.coinSpawnTimer -= dt;
+        if (this.coinSpawnTimer <= 0 && this.arenaCoins.length < 30) {
+            const x = (Math.random() - 0.5) * 60;
+            const z = (Math.random() - 0.5) * 60;
+            this.spawnArenaCoin(x, z);
+            this.coinSpawnTimer = 3 + Math.random() * 4;
+        }
+
+        for (let i = this.arenaCoins.length - 1; i >= 0; i--) {
+            const c = this.arenaCoins[i];
+            c.life -= dt;
+
+            // Physics for burst coins
+            if (!c.grounded) {
+                c.vel.y -= 15 * dt;
+                c.mesh.position.addScaledVector(c.vel, dt);
+                c.vel.multiplyScalar(0.98);
+                if (c.mesh.position.y <= 1.0) {
+                    c.mesh.position.y = 1.0;
+                    c.vel.set(0, 0, 0);
+                    c.grounded = true;
+                }
+            }
+
+            // Spin and bob
+            c.mesh.rotation.z += dt * 3;
+            if (c.grounded) {
+                c.mesh.position.y = 1.0 + Math.sin(this.gameTime * 2 + c.bobOffset) * 0.15;
+            }
+
+            // Pickup check
+            const dist = this.player.mesh.position.distanceTo(c.mesh.position);
+            if (dist < 1.8) {
+                this.sessionCoins++;
+                this.currency.addCoins(1);
+                this.playSynthSound('coin');
+                this.scene.remove(c.mesh);
+                this.arenaCoins.splice(i, 1);
+                continue;
+            }
+
+            // Expire
+            if (c.life <= 0) {
+                this.scene.remove(c.mesh);
+                this.arenaCoins.splice(i, 1);
+            }
         }
     }
 
@@ -748,11 +913,21 @@ export default class Game {
         for (let stickman of this.stickmen) {
             if (!stickman.isTagged) {
                 if (this.player.mesh.position.distanceTo(stickman.mesh.position) < CONFIG.tag_distance) {
+                    const pos = stickman.mesh.position.clone();
                     stickman.tag();
                     this.taggedCount++;
                     this.scoreDisplay.innerText = `Tagged: ${this.taggedCount} / ${this.totalStickmen}`;
                     this.playSynthSound('tag');
-                    this.createTagExplosion(stickman.mesh.position, 0x51cf66);
+                    this.createTagExplosion(pos, 0xfcc419);
+
+                    // Spawn coin burst where the enemy was
+                    this.spawnCoinBurst(pos, CONFIG.coins_per_enemy);
+
+                    // Fade out and remove the stickman after a short delay
+                    setTimeout(() => {
+                        stickman.destroy();
+                    }, 200);
+
                     if (this.taggedCount >= this.totalStickmen) {
                         this.endGame('win');
                     }
@@ -807,8 +982,9 @@ export default class Game {
         overlay.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.45);backdrop-filter:blur(8px);display:flex;justify-content:center;align-items:center;z-index:9999;pointer-events:auto;flex-direction:column;text-align:center;';
         overlay.innerHTML = html;
         document.body.appendChild(overlay);
-        document.getElementById('ea-retry').onclick = () => this.restartGame(false);
-        document.getElementById('ea-mods').onclick = () => this.restartGame(true);
+        document.getElementById('ea-retry')?.addEventListener('click', () => this.restartGame(false));
+        document.getElementById('ea-mods')?.addEventListener('click', () => this.restartGame(true));
+        document.getElementById('ea-next')?.addEventListener('click', () => this.nextLevel());
         return overlay;
     }
 
@@ -816,9 +992,9 @@ export default class Game {
         this.createEndOverlay(`
             <div class="win-card">
                 <h2 class="neon-text lose-title">GAME OVER</h2>
-                <p class="bonus-text">Better luck next time!</p>
+                <p class="bonus-text">Level ${this.level} — Better luck next time!</p>
                 <div class="end-actions">
-                    <button class="btn-play-again" id="ea-retry">PLAY AGAIN</button>
+                    <button class="btn-play-again" id="ea-retry">TRY AGAIN</button>
                     <button class="btn-change-mods" id="ea-mods">CHANGE MODS</button>
                 </div>
             </div>
@@ -826,19 +1002,19 @@ export default class Game {
     }
 
     showWinMenu() {
-        const baseCoins = (this.mods.has('worldcup') ? 1 : this.totalStickmen) * CONFIG.coins_per_enemy;
         const timeBonus = Math.max(0, CONFIG.time_bonus_limit - Math.floor(this.gameTime));
-        const totalEarned = baseCoins + timeBonus;
-        this.currency.addCoins(totalEarned);
+        const totalEarned = this.sessionCoins + timeBonus;
+        this.currency.addCoins(timeBonus);
 
         this.createEndOverlay(`
             <div class="win-card">
-                <h2 class="neon-text">${this.mods.has('worldcup') ? 'WORLD CUP WIN!' : 'STAGE CLEARED!'}</h2>
+                <h2 class="neon-text">${this.mods.has('worldcup') ? 'WORLD CUP WIN!' : `LEVEL ${this.level} CLEARED!`}</h2>
                 <div class="coin-display"><span id="counter">0</span></div>
-                <p class="bonus-text">+${timeBonus} time bonus | ${this.gameTime.toFixed(1)}s</p>
+                <p class="bonus-text">${this.sessionCoins} collected + ${timeBonus} time bonus | ${this.gameTime.toFixed(1)}s</p>
                 <div class="end-actions">
-                    <button class="btn-play-again" id="ea-retry">PLAY AGAIN</button>
-                    <button class="btn-change-mods" id="ea-mods">CHANGE MODS</button>
+                    <button class="btn-play-again" id="ea-next" style="background:linear-gradient(135deg,#fcc419,#f59f00);color:#fff;box-shadow:0 4px 0 #e67e22,0 6px 20px rgba(245,159,0,0.3);">NEXT LEVEL</button>
+                    <button class="btn-play-again" id="ea-retry">REPLAY</button>
+                    <button class="btn-change-mods" id="ea-mods">MODS</button>
                 </div>
             </div>
         `);
@@ -850,6 +1026,12 @@ export default class Game {
             if (current >= totalEarned) { current = totalEarned; clearInterval(interval); this.playSynthSound('powerup'); }
             counter.innerText = `+${current} coins`;
         }, 30);
+    }
+
+    nextLevel() {
+        this.level++;
+        localStorage.setItem('stickman_level', this.level);
+        this.restartGame(false);
     }
 
     restartGame(changeMods) {
@@ -864,6 +1046,10 @@ export default class Game {
         this.activePowerups = [];
         this.activeTraps.forEach(t => this.scene.remove(t.mesh));
         this.activeTraps = [];
+        this.arenaCoins.forEach(c => this.scene.remove(c.mesh));
+        this.arenaCoins = [];
+        this.sessionCoins = 0;
+        this.coinSpawnTimer = 0;
         this.dustParticles.forEach(d => this.scene.remove(d.mesh));
         this.dustParticles = [];
         this.trailParticles.forEach(t => this.scene.remove(t.mesh));
@@ -887,6 +1073,8 @@ export default class Game {
         this.powerupActive.style.display = 'none';
 
         if (changeMods) {
+            this.mods.unlock();
+            this.updateStartSubtitle();
             this.startScreen.style.display = 'flex';
         } else {
             this.startGame();
@@ -984,6 +1172,13 @@ export default class Game {
             gain.gain.setValueAtTime(0.3, t);
             gain.gain.exponentialRampToValueAtTime(0.01, t + 0.35);
             osc.start(); osc.stop(t + 0.35);
+        } else if (type === 'coin') {
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(1400, t);
+            osc.frequency.exponentialRampToValueAtTime(1800, t + 0.06);
+            gain.gain.setValueAtTime(0.2, t);
+            gain.gain.exponentialRampToValueAtTime(0.01, t + 0.1);
+            osc.start(); osc.stop(t + 0.1);
         }
     }
 
@@ -1059,6 +1254,9 @@ export default class Game {
 
             // Magnet effect
             this.updateMagnet(dt);
+
+            // Arena coins
+            this.updateArenaCoins(dt);
 
             // Update powerup HUD timer
             this.updatePowerupHUD();
