@@ -46,10 +46,11 @@ export default class Arena extends GameObject3D {
             this.mesh.add(new THREE.Mesh(new THREE.BoxGeometry(w, h, d), wallMat).translateX(x).translateY(y).translateZ(z));
             this.addBoxCollider(x, 0, z, w, h, d);
         };
-        bw(80, 8, 4, 0, 4, -42);
-        bw(80, 8, 4, 0, 4, 42);
-        bw(4, 8, 80, -42, 4, 0);
-        bw(4, 8, 80, 42, 4, 0);
+        // Taller walls (40 units) and pulled inward to align with the hard clamp at +/-39
+        bw(80, 40, 4, 0, 20, -42);
+        bw(80, 40, 4, 0, 20, 42);
+        bw(4, 40, 80, -42, 20, 0);
+        bw(4, 40, 80, 42, 20, 0);
     }
 
     addBox(w, h, d, x, z, mat) {

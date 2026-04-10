@@ -69,6 +69,9 @@ export default class Player extends GameObject3D {
         this.mobileJumpTrigger = false;
         this.mobileSlideTrigger = false;
 
+        // Edge-triggered jump (prevents auto-jump when holding space)
+        this.jumpRequested = false;
+
         // Animation smoothing
         this.smoothSpeed = 0;
         this.smoothLean = 0;
@@ -138,6 +141,10 @@ export default class Player extends GameObject3D {
         document.addEventListener('keydown', (e) => {
             let key = e.key.toLowerCase();
             if (key === ' ') key = 'space';
+            // Edge-trigger jump only on fresh press (not when held)
+            if (key === 'space' && !this.keys.space) {
+                this.jumpRequested = true;
+            }
             this.keys[key] = true;
         });
         document.addEventListener('keyup', (e) => {
@@ -336,8 +343,9 @@ export default class Player extends GameObject3D {
         // 5. Auto-vault check
         this.checkAutoVault(allColliders, moveDir, isMoving);
 
-        // 6. Jump
-        const wantJump = this.keys.space || this.mobileJumpTrigger;
+        // 6. Jump (edge-triggered - only fires once per press)
+        const wantJump = this.jumpRequested || this.mobileJumpTrigger;
+        this.jumpRequested = false;
 
         if (wantJump && !this.isVaulting) {
             if (this.isSliding) {
@@ -454,6 +462,13 @@ export default class Player extends GameObject3D {
         }
 
         if (pos.y <= 0) { pos.y = 0; this.velocity.y = 0; this.isGrounded = true; }
+
+        // Hard arena boundary clamp (arena is 80x80, walls inset by 1)
+        const bound = 39;
+        if (pos.x > bound) { pos.x = bound; this.velocity.x = 0; }
+        if (pos.x < -bound) { pos.x = -bound; this.velocity.x = 0; }
+        if (pos.z > bound) { pos.z = bound; this.velocity.z = 0; }
+        if (pos.z < -bound) { pos.z = -bound; this.velocity.z = 0; }
     }
 
     animateLimbs(dt, speed, isMoving, moveDir) {

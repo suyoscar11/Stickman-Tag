@@ -34,7 +34,7 @@ const CONFIG = {
 
 const POWERUP_TYPES = {
     freeze: { emoji: '\u2744\uFE0F', label: 'FREEZE', color: 0x74b9ff, duration: 4 },
-    trap:   { emoji: '\uD83E\uDEA4', label: 'TRAP', color: 0xfdcb6e, duration: 0 },
+    trap:   { emoji: '\uD83C\uDFAF', label: 'TRAP', color: 0xfdcb6e, duration: 0 },
     speed:  { emoji: '\u26A1', label: 'SPEED', color: 0xff7675, duration: 6 },
     magnet: { emoji: '\uD83E\uDDF2', label: 'MAGNET', color: 0xa29bfe, duration: 5 },
 };
@@ -314,14 +314,21 @@ export default class Game {
                 globalLevel++;
                 if (li > 1) {
                     const conn = document.createElement('div');
-                    conn.className = 'level-connector' + (globalLevel <= this.level ? ' done' : '');
+                    conn.className = 'level-connector done';
                     dots.appendChild(conn);
                 }
                 const dot = document.createElement('div');
                 if (globalLevel < this.level) dot.className = 'level-dot completed';
                 else if (globalLevel === this.level) dot.className = 'level-dot current';
-                else dot.className = 'level-dot locked';
+                else dot.className = 'level-dot completed';
                 dot.textContent = globalLevel;
+                dot.style.cursor = 'pointer';
+                const targetLevel = globalLevel;
+                dot.addEventListener('click', () => {
+                    this.level = targetLevel;
+                    localStorage.setItem('stickman_level', this.level);
+                    this.showNormalSetup();
+                });
                 dots.appendChild(dot);
             }
 
