@@ -34,7 +34,7 @@ const CONFIG = {
 
 const POWERUP_TYPES = {
     freeze: { emoji: '\u2744\uFE0F', label: 'FREEZE', color: 0x74b9ff, duration: 4 },
-    trap:   { emoji: '\uD83C\uDFAF', label: 'TRAP', color: 0xfdcb6e, duration: 0 },
+    time:   { emoji: '\u23F1\uFE0F', label: '+10s', color: 0x51cf66, duration: 0 },
     speed:  { emoji: '\u26A1', label: 'SPEED', color: 0xff7675, duration: 6 },
     magnet: { emoji: '\uD83E\uDDF2', label: 'MAGNET', color: 0xa29bfe, duration: 5 },
 };
@@ -185,10 +185,12 @@ export default class Game {
         this.timeLimit = 60;
         this.timeRemaining = 60;
 
-        // World Cup lives
-        this.wcLives = 5;
-        this.wcTeammates = []; // friendly AI stickmen
-        this.wcEnemyRunners = [];
+        // World Cup: relentless evade
+        this.wcLives = 3;
+        this.wcChaser = null;
+        this.wcEvadeTimer = 90; // survive this long to win
+        this.wcInvulnTimer = 0; // brief invuln after getting tagged
+        this.wcDifficulty = 1; // ramps up over time
 
         this.allColliders = [];
         this.activePowerups = [];
@@ -197,7 +199,6 @@ export default class Game {
         this.trailParticles = [];
         this.gameObjectsCreated = false;
         this.gameEnded = false;
-        this.activeTraps = [];
         this.arenaCoins = [];
         this.coinSpawnTimer = 0;
         this.sessionCoins = 0;
@@ -525,41 +526,33 @@ export default class Game {
     }
 
     initWorldCup() {
-        this.wcLives = 5;
-        this.totalStickmen = 5;
-        this.wcTeammates = [];
-        this.wcEnemyRunners = [];
+        this.wcLives = 3;
+        this.totalStickmen = 1;
+        this.wcEvadeTimer = 90;
+        this.wcInvulnTimer = 0;
+        this.wcDifficulty = 1;
 
-        // Spawn 5 enemy runners (flee from player)
-        for (let i = 0; i < 5; i++) {
-            const x = 15 + (Math.random() - 0.5) * 30;
-            const z = 15 + (Math.random() - 0.5) * 30;
-            const s = new Stickman(this.scene, x, z, CONFIG, this.mods);
-            s.speed += 2;
-            s.runSpeed += 2;
-            this.stickmen.push(s);
-            this.wcEnemyRunners.push(s);
-        }
+        // Spawn one relentless chaser as far from player as possible
+        const chaser = new Stickman(this.scene, 25, 25, CONFIG, this.mods);
+        chaser.setChaseMode(true);
+        // Make it FAST and aggressive — no breathing room
+        chaser.speed = 11;
+        chaser.runSpeed = 13;
+        chaser.fleeDistance = 0;
+        // Bright red so it's obvious
+        chaser.material.color.setHex(0xff3838);
+        chaser.material.emissive.setHex(0xc0392b);
+        chaser.material.emissiveIntensity = 0.6;
 
-        // Spawn 5 friendly teammates (green, they wander — enemies can tag them)
-        for (let i = 0; i < 5; i++) {
-            const x = -15 + (Math.random() - 0.5) * 20;
-            const z = -15 + (Math.random() - 0.5) * 20;
-            const t = new Stickman(this.scene, x, z, CONFIG, this.mods);
-            t.material.color.setHex(0x51cf66);
-            t.material.emissive.setHex(0x2d7a3a);
-            t.isTeammate = true;
-            this.stickmen.push(t);
-            this.wcTeammates.push(t);
-        }
-
+        this.wcChaser = chaser;
+        this.stickmen.push(chaser);
         this.updateLivesDisplay();
     }
 
     updateLivesDisplay() {
         const livesEl = document.getElementById('lives-display');
         if (livesEl) {
-            livesEl.textContent = '\u2764\uFE0F'.repeat(this.wcLives) + '\uD83D\uDDA4'.repeat(5 - this.wcLives);
+            livesEl.textContent = '\u2764\uFE0F'.repeat(this.wcLives) + '\uD83D\uDDA4'.repeat(3 - this.wcLives);
         }
     }
 
@@ -600,9 +593,9 @@ export default class Game {
 
         if (this.gameMode === 'worldcup') {
             this.levelDisplay.innerText = 'WORLD CUP';
-            this.scoreDisplay.innerText = `Tagged: 0 / ${this.totalStickmen}`;
+            this.scoreDisplay.innerText = 'EVADE!';
             document.getElementById('wc-lives').style.display = 'block';
-            this.timeDisplay.innerText = '';
+            this.timeDisplay.innerText = `${this.wcEvadeTimer}s`;
         } else {
             this.levelDisplay.innerText = `${CHAPTERS[chapter].name} ${levelInChapter}`;
             this.scoreDisplay.innerText = `Tagged: ${this.taggedCount} / ${this.totalStickmen}`;
@@ -644,8 +637,15 @@ export default class Game {
                 }
             });
             this.createFreezeWave(pos);
-        } else if (type === 'trap') {
-            this.placeTrap(this.player.mesh.position.clone());
+        } else if (type === 'time') {
+            // +10s to the timer (normal mode) or to wcEvadeTimer (world cup)
+            if (this.gameMode === 'normal') {
+                this.timeRemaining += 10;
+                this.spawnFloatingText('+10s', this.player.mesh.position, '#51cf66');
+            } else if (this.gameMode === 'worldcup') {
+                this.wcEvadeTimer = (this.wcEvadeTimer || 0) + 10;
+                this.spawnFloatingText('+10s', this.player.mesh.position, '#51cf66');
+            }
         } else if (type === 'magnet') {
             this.player.activePowerupType = 'magnet';
             this.player.powerupTimer = POWERUP_TYPES.magnet.duration;
@@ -653,50 +653,6 @@ export default class Game {
             this.player.material.emissive.setHex(0x6c5ce7);
         }
         this.updatePowerupHUD();
-    }
-
-    placeTrap(position) {
-        position.y = 0.05;
-        const trapGroup = new THREE.Group();
-        const disc = new THREE.Mesh(
-            new THREE.CylinderGeometry(1.2, 1.2, 0.1, 16),
-            new THREE.MeshStandardMaterial({ color: 0xfdcb6e, emissive: 0xf39c12, emissiveIntensity: 0.4, transparent: true, opacity: 0.7, roughness: 0.4 })
-        );
-        trapGroup.add(disc);
-        const ring = new THREE.Mesh(
-            new THREE.TorusGeometry(0.8, 0.06, 8, 24),
-            new THREE.MeshBasicMaterial({ color: 0xe17055, transparent: true, opacity: 0.6 })
-        );
-        ring.rotation.x = Math.PI / 2; ring.position.y = 0.06;
-        trapGroup.add(ring);
-        trapGroup.position.copy(position);
-        this.scene.add(trapGroup);
-        this.activeTraps.push({ mesh: trapGroup, position: position.clone(), lifetime: 20 });
-    }
-
-    updateTraps(dt) {
-        for (let i = this.activeTraps.length - 1; i >= 0; i--) {
-            const trap = this.activeTraps[i];
-            trap.lifetime -= dt;
-            if (trap.mesh.children[1]) trap.mesh.children[1].rotation.z += dt * 2;
-
-            for (const s of this.stickmen) {
-                if (!s.isTagged && !s.isFrozen && !s.isTeammate) {
-                    if (trap.position.distanceTo(s.mesh.position) < 1.5) {
-                        s.freeze(3);
-                        this.createFreezeExplosion(s.mesh.position);
-                        this.playSynthSound('trap');
-                        this.scene.remove(trap.mesh);
-                        this.activeTraps.splice(i, 1);
-                        break;
-                    }
-                }
-            }
-            if (trap.lifetime <= 0) {
-                this.scene.remove(trap.mesh);
-                this.activeTraps.splice(i, 1);
-            }
-        }
     }
 
     updateMagnet(dt) {
@@ -1076,7 +1032,10 @@ export default class Game {
     attemptTag() {
         if (!this.player || this.gameEnded) return;
 
-        const targets = this.gameMode === 'worldcup' ? this.wcEnemyRunners : this.stickmen;
+        // In World Cup mode the player evades — they cannot tag
+        if (this.gameMode === 'worldcup') return;
+
+        const targets = this.stickmen;
 
         for (let s of targets) {
             if (!s.isTagged) {
@@ -1102,30 +1061,58 @@ export default class Game {
         }
     }
 
-    // ---- WORLD CUP UPDATE ----
+    // ---- WORLD CUP UPDATE: relentless evade ----
     updateWorldCup(dt) {
-        if (!this.player) return;
+        if (!this.player || !this.wcChaser) return;
 
-        // Enemy runners try to tag teammates
-        for (const runner of this.wcEnemyRunners) {
-            if (runner.isTagged) continue;
-            for (let i = this.wcTeammates.length - 1; i >= 0; i--) {
-                const tm = this.wcTeammates[i];
-                if (tm.isTagged) continue;
-                if (runner.mesh.position.distanceTo(tm.mesh.position) < 3.0) {
-                    tm.tag();
-                    this.wcLives--;
-                    this.updateLivesDisplay();
-                    this.createTagExplosion(tm.mesh.position, 0xff6b6b);
-                    this.playSynthSound('tag');
-                    setTimeout(() => tm.destroy(), 200);
+        // Tick survival timer
+        this.wcEvadeTimer -= dt;
+        const secs = Math.max(0, Math.ceil(this.wcEvadeTimer));
+        this.timeDisplay.innerText = `${secs}s`;
 
-                    if (this.wcLives <= 0) {
-                        this.endGame('lose');
-                        return;
-                    }
-                    break;
+        // Win condition: survive the timer
+        if (this.wcEvadeTimer <= 0 && !this.gameEnded) {
+            this.endGame('win');
+            return;
+        }
+
+        // Tick invuln after a hit
+        if (this.wcInvulnTimer > 0) {
+            this.wcInvulnTimer -= dt;
+            // Flash player visual during invuln
+            this.player.bodyGroup.visible = Math.floor(this.gameTime * 12) % 2 === 0;
+        } else {
+            this.player.bodyGroup.visible = true;
+        }
+
+        // Difficulty ramp: chaser gets faster every 15s
+        const rampSteps = Math.floor((90 - this.wcEvadeTimer) / 15);
+        if (rampSteps > this.wcDifficulty - 1) {
+            this.wcDifficulty = rampSteps + 1;
+            this.wcChaser.runSpeed = Math.min(13 + rampSteps * 0.6, 18);
+            this.wcChaser.speed = this.wcChaser.runSpeed;
+        }
+
+        // Check tag
+        if (this.wcInvulnTimer <= 0 && !this.wcChaser.isTagged) {
+            const dist = this.player.mesh.position.distanceTo(this.wcChaser.mesh.position);
+            if (dist < 2.0) {
+                this.wcLives--;
+                this.updateLivesDisplay();
+                this.createTagExplosion(this.player.mesh.position, 0xff3838);
+                this.screenFlash('#ff3838');
+                this.triggerFreezeFrame(0.1);
+                this.playSynthSound('tag');
+
+                if (this.wcLives <= 0) {
+                    this.endGame('lose');
+                    return;
                 }
+
+                // Brief invuln + push chaser back to give breathing room
+                this.wcInvulnTimer = 1.5;
+                const back = this.wcChaser.mesh.position.clone().sub(this.player.mesh.position).normalize().multiplyScalar(15);
+                this.wcChaser.mesh.position.add(back);
             }
         }
     }
@@ -1156,7 +1143,7 @@ export default class Game {
 
     showLoseMenu() {
         const info = this.gameMode === 'worldcup'
-            ? 'Your team was eliminated!'
+            ? `You got caught! Survived ${(90 - this.wcEvadeTimer).toFixed(1)}s`
             : `Ran out of time — ${this.taggedCount}/${this.totalStickmen} tagged`;
 
         this.createEndOverlay(`
@@ -1173,7 +1160,7 @@ export default class Game {
     }
 
     showWinMenu() {
-        const timeBonus = this.gameMode === 'normal' ? Math.max(0, Math.floor(this.timeRemaining)) : 20;
+        const timeBonus = this.gameMode === 'normal' ? Math.max(0, Math.floor(this.timeRemaining)) : 100;
         this.currency.addCoins(timeBonus);
 
         // Chapter completion reward
@@ -1189,7 +1176,7 @@ export default class Game {
         const totalEarned = this.sessionCoins + timeBonus + chapterReward;
         const chapterLine = chapterReward > 0 ? `<div style="color:#667eea;font-size:1.1em;font-weight:800;margin:6px 0;">\uD83C\uDF89 Chapter Complete! +${chapterReward} bonus</div>` : '';
 
-        const title = this.gameMode === 'worldcup' ? 'WORLD CUP WIN!' : `LEVEL ${this.level} CLEARED!`;
+        const title = this.gameMode === 'worldcup' ? 'YOU SURVIVED!' : `LEVEL ${this.level} CLEARED!`;
 
         this.createEndOverlay(`
             <div class="win-card">
@@ -1231,14 +1218,12 @@ export default class Game {
         if (this.arena) { this.arena.destroy(); this.arena = null; }
         if (this.stickmen) { this.stickmen.forEach(s => s.destroy()); this.stickmen = []; }
         this.activePowerups.forEach(p => this.scene.remove(p)); this.activePowerups = [];
-        this.activeTraps.forEach(t => this.scene.remove(t.mesh)); this.activeTraps = [];
         this.arenaCoins.forEach(c => this.scene.remove(c.mesh)); this.arenaCoins = [];
         this.dustParticles.forEach(d => this.scene.remove(d.mesh)); this.dustParticles = [];
         this.trailParticles.forEach(t => this.scene.remove(t.mesh)); this.trailParticles = [];
         this.ambientParticles.forEach(a => this.scene.remove(a.mesh)); this.ambientParticles = [];
         this.allColliders = [];
-        this.wcTeammates = [];
-        this.wcEnemyRunners = [];
+        this.wcChaser = null;
 
         this.isRunning = false;
         this.taggedCount = 0;
@@ -1249,7 +1234,10 @@ export default class Game {
         this.gameEnded = false;
         this.sessionCoins = 0;
         this.coinSpawnTimer = 0;
-        this.wcLives = 5;
+        this.wcLives = 3;
+        this.wcEvadeTimer = 90;
+        this.wcInvulnTimer = 0;
+        this.wcDifficulty = 1;
 
         this.hud.style.display = 'none';
         this.wcBanner.style.display = 'none';
@@ -1338,10 +1326,6 @@ export default class Game {
             osc.type = 'sine'; osc.frequency.setValueAtTime(350, t); osc.frequency.exponentialRampToValueAtTime(700, t + 0.12);
             gain.gain.setValueAtTime(0.12, t); gain.gain.exponentialRampToValueAtTime(0.01, t + 0.15);
             osc.start(); osc.stop(t + 0.15);
-        } else if (type === 'trap') {
-            osc.type = 'triangle'; osc.frequency.setValueAtTime(600, t); osc.frequency.exponentialRampToValueAtTime(200, t + 0.2);
-            gain.gain.setValueAtTime(0.25, t); gain.gain.exponentialRampToValueAtTime(0.01, t + 0.25);
-            osc.start(); osc.stop(t + 0.25);
         } else if (type === 'freeze') {
             osc.type = 'sine'; osc.frequency.setValueAtTime(1200, t); osc.frequency.exponentialRampToValueAtTime(400, t + 0.3);
             gain.gain.setValueAtTime(0.3, t); gain.gain.exponentialRampToValueAtTime(0.01, t + 0.35);
@@ -1438,7 +1422,6 @@ export default class Game {
                 }
             }
 
-            this.updateTraps(dt);
             this.updateMagnet(dt);
             this.updateArenaCoins(dt);
             this.updatePowerupHUD();
